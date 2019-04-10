@@ -11,7 +11,7 @@ import (
 	tb "gopkg.in/tucnak/telebot.v2"
 )
 
-// Google Sis Bot
+// News Bot
 func newsBot() {
 	b, err := tb.NewBot(tb.Settings{
 		Token:  os.Getenv("SECRET_TOKEN"),
@@ -28,6 +28,7 @@ func newsBot() {
 
 	})
 
+	// Getting the Channel
 	channel, channelGetErr := b.ChatByID(os.Getenv("CHANNEL_ID"))
 
 	if channelGetErr != nil {
