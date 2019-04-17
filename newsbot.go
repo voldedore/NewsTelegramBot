@@ -1,4 +1,4 @@
-package main
+package newsbot
 
 import (
 	"database/sql"
@@ -171,8 +171,7 @@ func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
 
 }
 
-func main() {
+func NewsBot() {
 	go prepDB()
 	go newsBot()
-	select {}
 }
