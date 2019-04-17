@@ -111,7 +111,7 @@ func makeMessage(title string, link string) string {
 // News Bot
 func newsBot() {
 	b, err := tb.NewBot(tb.Settings{
-		Token:  os.Getenv("SECRET_TOKEN"),
+		Token:  os.Getenv("NEWS_BOT_SECRET_TOKEN"),
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
 	})
 
