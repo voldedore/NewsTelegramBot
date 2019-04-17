@@ -2,11 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/mmcdole/gofeed"
+	"github.com/robfig/cron"
 	tb "gopkg.in/tucnak/telebot.v2"
 )
 
@@ -14,9 +17,12 @@ const DB_NAME string = "news.db"
 const NEWS_SRC_TINHTE_LABEL string = "tinhte"
 const NEWS_SRC_BING_LABEL string = "bing"
 const INITIALIZED_FLAG_FILE_NAME string = "init.done"
+const NEWS_SRC_TINHTE_URL string = "https://feeds.feedburner.com/tinhte/"
 
 func initDB() {
+	log.Println("Initializing Database...")
 	// Create DB
+	log.Println("Removing old DB...")
 	os.Remove(DB_NAME)
 	db, err := sql.Open("sqlite3", DB_NAME)
 	if err != nil {
@@ -24,6 +30,7 @@ func initDB() {
 	}
 	defer db.Close()
 
+	log.Println("Creating tables...")
 	sqlStmt := `
     create table news_content (id integer not null primary key, source text, url text);
     `
@@ -37,8 +44,10 @@ func initDB() {
 func prepDB() {
 
 	// Try to open the flag, if it's not exist, then init the file
+	log.Println("Checking for init flag...")
 	if file, err := os.Open(INITIALIZED_FLAG_FILE_NAME); os.IsNotExist(err) {
 		file.Close()
+		log.Println("Not init yet, creating flag...")
 
 		// Write the flag
 		file, err := os.Create(INITIALIZED_FLAG_FILE_NAME)
@@ -47,15 +56,56 @@ func prepDB() {
 			return
 		}
 		file.Close()
+		log.Println("Flag created")
 		initDB()
 
 	} else {
-		log.Println("This seems inited")
+		log.Println("Flag found")
+		log.Println("This seems inited. Checking for existed database...")
 		if file, err := os.Open(DB_NAME); os.IsNotExist(err) {
 			file.Close()
+			log.Println("Database does not exist")
 			initDB()
-		} // This should validate DB, a bit overkill for this little project
+		} else { // This should validate DB, a bit overkill for this little project
+			log.Println("Database found")
+		}
 	}
+}
+
+func insertArticle(db *sql.DB, source string, articleUrl string) {
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+	stmt, err := tx.Prepare("insert into news_content (source, url) values(?, ?)")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(source, articleUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tx.Commit()
+}
+
+func checkIfRowExists(db *sql.DB, articleUrl string) bool {
+	stmt, err := db.Prepare("select count(id) as count from news_content where url = ?")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+	var count int
+	err = stmt.QueryRow(articleUrl).Scan(&count)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return count > 0
+}
+
+func makeMessage(title string, link string) string {
+	return fmt.Sprintf("%s\n\n%s", title, link)
 }
 
 // News Bot
@@ -82,9 +132,43 @@ func newsBot() {
 		return
 	}
 
-	b.Send(channel, "This test message")
+	// CRON every 5 min, check for the feed update
+	c := cron.New()
+	c.AddFunc("0 0/5 * * * *", func() {
+		fetchTinhTeNews(b, channel)
+	})
 
+	c.Start()
 	b.Start()
+}
+
+func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
+	log.Println("Fetching news...")
+	// Fetch and parse RSS
+	// Open DB
+	db, err := sql.Open("sqlite3", DB_NAME)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	// Instantiate NewsParser
+	fp := gofeed.NewParser()
+	feed, feedErr := fp.ParseURL(NEWS_SRC_TINHTE_URL)
+	if feedErr != nil {
+		return
+	}
+	siteName := feed.Generator
+	articles := feed.Items
+	for _, item := range articles {
+		if !checkIfRowExists(db, item.GUID) {
+			log.Println(item.GUID)
+			insertArticle(db, siteName, item.GUID)
+			b.Send(channel, makeMessage(item.Title, item.GUID))
+		}
+	}
+
+	log.Println("Fetching done")
+
 }
 
 func main() {
