@@ -13,11 +13,18 @@ import (
 	tb "gopkg.in/tucnak/telebot.v2"
 )
 
-const DB_NAME string = "news.db"
-const NEWS_SRC_TINHTE_LABEL string = "tinhte"
-const NEWS_SRC_BING_LABEL string = "bing"
-const INITIALIZED_FLAG_FILE_NAME string = "init.done"
-const NEWS_SRC_TINHTE_URL string = "https://feeds.feedburner.com/tinhte/"
+const (
+	DB_NAME                          string = "news.db"
+	NEWS_SRC_TINHTE_LABEL            string = "tinhte"
+	NEWS_SRC_BING_LABEL              string = "bing"
+	INITIALIZED_FLAG_FILE_NAME       string = "init.done"
+	NEWS_SRC_TINHTE_URL              string = "https://feeds.feedburner.com/tinhte/"
+	NEWS_SRC_GOOGLE_NEWS_VN_URL      string = "https://news.google.com/rss?hl=vi&gl=VN&ceid=VN:vi"
+	NEWS_SRC_GOOGLE_NEWS_US_URL      string = "https://news.google.com/rss?hl=en&gl=US&ceid=US:en"
+	LANG_VI                          string = "vi"
+	LANG_EN                          string = "en"
+	NEWS_SRC_GOOGLE_NEWS_US_TECH_URL string = "https://news.google.com/news/rss/headlines/section/topic/TECHNOLOGY?hl=en&gl=US&ceid=US:en"
+)
 
 func initDB() {
 	log.Println("Initializing Database...")
@@ -135,7 +142,8 @@ func newsBot() {
 	// CRON every 5 min, check for the feed update
 	c := cron.New()
 	c.AddFunc("0 0/5 * * * *", func() {
-		fetchTinhTeNews(b, channel)
+		go fetchTinhTeNews(b, channel)
+		go fetchGoogleNews(b, channel, NEWS_SRC_GOOGLE_NEWS_VN_URL)
 	})
 
 	c.Start()
@@ -164,6 +172,35 @@ func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
 			log.Println(item.GUID)
 			insertArticle(db, siteName, item.GUID)
 			b.Send(channel, makeMessage(item.Title, item.GUID))
+		}
+	}
+
+	log.Println("Fetching done")
+
+}
+
+func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string) {
+	log.Println("Fetching news...")
+	// Fetch and parse RSS
+	// Open DB
+	db, err := sql.Open("sqlite3", DB_NAME)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	// Instantiate NewsParser
+	fp := gofeed.NewParser()
+	feed, feedErr := fp.ParseURL(url)
+	if feedErr != nil {
+		return
+	}
+	siteName := feed.Generator
+	articles := feed.Items
+	for _, item := range articles {
+		if !checkIfRowExists(db, item.Link) {
+			log.Println(item.Link)
+			insertArticle(db, siteName, item.Link)
+			b.Send(channel, makeMessage(item.Title, item.Link))
 		}
 	}
 
