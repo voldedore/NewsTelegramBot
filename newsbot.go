@@ -139,9 +139,9 @@ func newsBot() {
 		return
 	}
 
-	// CRON every 5 min, check for the feed update
+	// CRON every 30 min, check for the feed update
 	c := cron.New()
-	c.AddFunc("0 0/5 * * * *", func() {
+	c.AddFunc("0 */30 * * * *", func() {
 		go fetchTinhTeNews(b, channel)
 		go fetchGoogleNews(b, channel, NEWS_SRC_GOOGLE_NEWS_VN_URL)
 	})
