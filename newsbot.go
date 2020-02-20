@@ -1,114 +1,119 @@
-package newsbot
+package main
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
+	// Dependencies
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mmcdole/gofeed"
-	"github.com/robfig/cron"
 	tb "gopkg.in/tucnak/telebot.v2"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// Declare all needed constants
 const (
-	DB_NAME                          string = "news.db"
-	NEWS_SRC_TINHTE_LABEL            string = "tinhte"
-	NEWS_SRC_BING_LABEL              string = "bing"
-	INITIALIZED_FLAG_FILE_NAME       string = "init.done"
-	NEWS_SRC_TINHTE_URL              string = "https://feeds.feedburner.com/tinhte/"
-	NEWS_SRC_GOOGLE_NEWS_VN_URL      string = "https://news.google.com/rss?hl=vi&gl=VN&ceid=VN:vi"
-	NEWS_SRC_GOOGLE_NEWS_US_URL      string = "https://news.google.com/rss?hl=en&gl=US&ceid=US:en"
-	LANG_VI                          string = "vi"
-	LANG_EN                          string = "en"
-	NEWS_SRC_GOOGLE_NEWS_US_TECH_URL string = "https://news.google.com/news/rss/headlines/section/topic/TECHNOLOGY?hl=en&gl=US&ceid=US:en"
+	dbName                string = "news.db"
+	newsSrcTinhTeLabel    string = "tinhte"
+	newsSrcBingLabel      string = "bing"
+	initFlagFilename      string = "init.done"
+	newSrcTinhTeURL       string = "https://feeds.feedburner.com/tinhte/"
+	newSrcGoogleVNUrl     string = "https://news.google.com/rss?hl=vi&gl=VN&ceid=VN:vi"
+	newSrcGoogleUSUrl     string = "https://news.google.com/rss?hl=en&gl=US&ceid=US:en"
+	langVi                string = "vi"
+	langEn                string = "en"
+	newSrcGoogleUSTechURL string = "https://news.google.com/news/rss/headlines/section/topic/TECHNOLOGY?hl=en&gl=US&ceid=US:en"
 )
 
-func initDB() {
-	log.Println("Initializing Database...")
-	// Create DB
-	log.Println("Removing old DB...")
-	os.Remove(DB_NAME)
-	db, err := sql.Open("sqlite3", DB_NAME)
+func getOsEnv(variable string, required bool, defaultVal string) string {
+	res := os.Getenv(variable)
+
+	if res == "" {
+		if required {
+			log.Fatalln("No variable named " + variable + " found")
+		} else {
+			log.Panicln("No variable named " + variable + " found")
+		}
+		return defaultVal
+	}
+	return res
+}
+
+//mongodb://<dbuser>:<dbpassword>@ds151012.mlab.com:51012/newstelegrambot
+func getDB() *mongo.Collection {
+
+	dbUsername := getOsEnv("MONGODB_USERNAME", true, "")
+	dbPassword := getOsEnv("MONGODB_PWD", true, "")
+	dbAddress := getOsEnv("MONGODB_ADDR", true, "")
+	dbPort := getOsEnv("MONGODB_PORT", true, "27017")
+
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	client, err := mongo.Connect(
+		ctx,
+		options.Client().ApplyURI("mongodb://"+dbUsername+":"+dbPassword+
+			"@"+dbAddress+":"+dbPort+"/newstelegrambot?retryWrites=false"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	collection := client.Database("newstelegrambot").Collection("item")
 
-	log.Println("Creating tables...")
-	sqlStmt := `
-    create table news_content (id integer not null primary key, source text, url text);
-    `
-	_, err = db.Exec(sqlStmt)
-	if err != nil {
-		log.Printf("%q: %s\n", err, sqlStmt)
-		return
-	}
+	log.Println("Connected DB")
+	return collection
 }
 
-func prepDB() {
+func insertArticle(collection *mongo.Collection, source string, article *gofeed.Item) {
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	_, err := collection.InsertOne(ctx, bson.M{
+		"title":   article.Title,
+		"link":    article.Link,
+		"guid":    article.GUID,
+		"pubDate": article.Published,
+		"source":  article.Author,
+		"points":  0,
+	})
+	// id := res.InsertedID
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Insert article with guid " + article.GUID)
+}
 
-	// Try to open the flag, if it's not exist, then init the file
-	log.Println("Checking for init flag...")
-	if file, err := os.Open(INITIALIZED_FLAG_FILE_NAME); os.IsNotExist(err) {
-		file.Close()
-		log.Println("Not init yet, creating flag...")
+func checkIfRowExists(collection *mongo.Collection, articleGUID string) bool {
+	var result struct {
+		Value float64
+	}
+	filter := bson.M{"guid": articleGUID}
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	err := collection.FindOne(ctx, filter).Decode(&result)
 
-		// Write the flag
-		file, err := os.Create(INITIALIZED_FLAG_FILE_NAME)
-		if err != nil {
-			log.Fatal("Flag create failed")
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+func updateRow(collection *mongo.Collection, articleGUID string) {
+	opts := options.FindOneAndUpdate().SetUpsert(false)
+	filter := bson.D{{"guid", articleGUID}}
+	update := bson.D{{"$inc", bson.D{{"points", 1}}}}
+	var updatedDocument bson.M
+	err := collection.FindOneAndUpdate(context.TODO(), filter, update, opts).Decode(&updatedDocument)
+	if err != nil {
+		// ErrNoDocuments means that the filter did not match any documents in the collection
+		if err == mongo.ErrNoDocuments {
 			return
 		}
-		file.Close()
-		log.Println("Flag created")
-		initDB()
-
-	} else {
-		log.Println("Flag found")
-		log.Println("This seems inited. Checking for existed database...")
-		if file, err := os.Open(DB_NAME); os.IsNotExist(err) {
-			file.Close()
-			log.Println("Database does not exist")
-			initDB()
-		} else { // This should validate DB, a bit overkill for this little project
-			log.Println("Database found")
-		}
-	}
-}
-
-func insertArticle(db *sql.DB, source string, articleUrl string) {
-	tx, err := db.Begin()
-	if err != nil {
-		log.Fatal(err)
-	}
-	stmt, err := tx.Prepare("insert into news_content (source, url) values(?, ?)")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(source, articleUrl)
-	if err != nil {
-		log.Fatal(err)
-	}
-	tx.Commit()
-}
-
-func checkIfRowExists(db *sql.DB, articleUrl string) bool {
-	stmt, err := db.Prepare("select count(id) as count from news_content where url = ?")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-	var count int
-	err = stmt.QueryRow(articleUrl).Scan(&count)
-	if err != nil {
 		log.Fatal(err)
 	}
 
-	return count > 0
+	log.Println("Update article guid " + articleGUID)
 }
 
 func makeMessage(title string, link string) string {
@@ -139,55 +144,50 @@ func newsBot() {
 		return
 	}
 
-	// CRON every 30 min, check for the feed update
-	c := cron.New()
-	c.AddFunc("0 */30 * * * *", func() {
-		go fetchTinhTeNews(b, channel)
-		go fetchGoogleNews(b, channel, NEWS_SRC_GOOGLE_NEWS_VN_URL)
-	})
+	var collection = getDB()
 
-	c.Start()
+	// CRON every 30 min, check for the feed update
+	// c := cron.New()
+	// c.AddFunc("0 */20 * * * *", func() {
+	fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
+	// })
+
+	// c.Start()
 	b.Start()
 }
 
-func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
+// func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
+// 	log.Println("Fetching news...")
+// 	// Fetch and parse RSS
+// 	// Open DB
+// 	db, err := sql.Open("sqlite3", dbName)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	defer db.Close()
+// 	// Instantiate NewsParser
+// 	fp := gofeed.NewParser()
+// 	feed, feedErr := fp.ParseURL(newSrcTinhTeURL)
+// 	if feedErr != nil {
+// 		return
+// 	}
+// 	siteName := feed.Generator
+// 	articles := feed.Items
+// 	for _, item := range articles {
+// 		if !checkIfRowExists(db, item.GUID) {
+// 			log.Println(item.GUID)
+// 			insertArticle(db, siteName, item.GUID)
+// 			b.Send(channel, makeMessage(item.Title, item.GUID))
+// 		}
+// 	}
+
+// 	log.Println("Fetching done")
+
+// }
+
+func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.Collection) {
 	log.Println("Fetching news...")
-	// Fetch and parse RSS
-	// Open DB
-	db, err := sql.Open("sqlite3", DB_NAME)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-	// Instantiate NewsParser
-	fp := gofeed.NewParser()
-	feed, feedErr := fp.ParseURL(NEWS_SRC_TINHTE_URL)
-	if feedErr != nil {
-		return
-	}
-	siteName := feed.Generator
-	articles := feed.Items
-	for _, item := range articles {
-		if !checkIfRowExists(db, item.GUID) {
-			log.Println(item.GUID)
-			insertArticle(db, siteName, item.GUID)
-			b.Send(channel, makeMessage(item.Title, item.GUID))
-		}
-	}
 
-	log.Println("Fetching done")
-
-}
-
-func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string) {
-	log.Println("Fetching news...")
-	// Fetch and parse RSS
-	// Open DB
-	db, err := sql.Open("sqlite3", DB_NAME)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
 	// Instantiate NewsParser
 	fp := gofeed.NewParser()
 	feed, feedErr := fp.ParseURL(url)
@@ -196,11 +196,13 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string) {
 	}
 	siteName := feed.Generator
 	articles := feed.Items
+
 	for _, item := range articles {
-		if !checkIfRowExists(db, item.Link) {
-			log.Println(item.Link)
-			insertArticle(db, siteName, item.Link)
-			b.Send(channel, makeMessage(item.Title, item.Link))
+		if !checkIfRowExists(collection, item.GUID) {
+			log.Println(item.Title)
+			insertArticle(collection, siteName, item)
+		} else {
+			updateRow(collection, item.GUID)
 		}
 	}
 
@@ -208,7 +210,7 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string) {
 
 }
 
-func NewsBot() {
-	go prepDB()
-	go newsBot()
+// NewsBot runs the bot
+func main() {
+	newsBot()
 }
