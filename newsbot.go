@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	// Dependencies
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mmcdole/gofeed"
-	tb "gopkg.in/tucnak/telebot.v2"
-
+	"github.com/robfig/cron"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	tb "gopkg.in/tucnak/telebot.v2"
 )
 
 // Declare all needed constants
@@ -29,7 +31,28 @@ const (
 	langVi                string = "vi"
 	langEn                string = "en"
 	newSrcGoogleUSTechURL string = "https://news.google.com/news/rss/headlines/section/topic/TECHNOLOGY?hl=en&gl=US&ceid=US:en"
+	// voteInterval is the interval of time that we vote the list of article
+	voteInterval int = 5
+	// publishInterval is the interval of time that we publish the articles if it pass the minimum
+	// points
+	publishInterval int = 30
+	// Threshold is the minimum point of the article be published, in ${voteInterval} minutes
+	// This is calculated by publishInterval / voteInterval
+	threshold int = 6
 )
+
+// ArticleItem describe what should have in an article entity
+type ArticleItem struct {
+	ID      *primitive.ObjectID `json:"ID" bson:"_id,omitempty"`
+	Name    string              `json:"name" bson:"name"`
+	Title   string              `json:"title" bson:"title"`
+	Link    string              `json:"link" bson:"link"`
+	GUID    string              `json:"guid" bson:"guid"`
+	PubDate string              `json:"pubDate" bson:"pubDate"`
+	Source  string              `json:"source" bson:"source"`
+	Points  int                 `json:"points" bson:"points"`
+	Publish bool                `json:"publish" bson:"publish"`
+}
 
 func getOsEnv(variable string, required bool, defaultVal string) string {
 	res := os.Getenv(variable)
@@ -45,7 +68,6 @@ func getOsEnv(variable string, required bool, defaultVal string) string {
 	return res
 }
 
-//mongodb://<dbuser>:<dbpassword>@ds151012.mlab.com:51012/newstelegrambot
 func getDB() *mongo.Collection {
 
 	dbUsername := getOsEnv("MONGODB_USERNAME", true, "")
@@ -76,12 +98,13 @@ func insertArticle(collection *mongo.Collection, source string, article *gofeed.
 		"pubDate": article.Published,
 		"source":  article.Author,
 		"points":  0,
+		"publish": false,
 	})
 	// id := res.InsertedID
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Insert article with guid " + article.GUID)
+	log.Println("Insert article guid " + article.GUID)
 }
 
 func checkIfRowExists(collection *mongo.Collection, articleGUID string) bool {
@@ -116,8 +139,34 @@ func updateRow(collection *mongo.Collection, articleGUID string) {
 	log.Println("Update article guid " + articleGUID)
 }
 
+func publish(collection *mongo.Collection, b *tb.Bot, channel *tb.Chat) {
+	log.Println("Publishing...")
+	opts := options.Find().SetSort(bson.D{{"points", 1}})
+	cursor, err := collection.Find(context.TODO(), bson.D{{"publish", false}, {"points", bson.D{{"$gt", 5}}}}, opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cursor.Close(context.TODO())
+
+	// Iterate the cursor and print out each document until the cursor is exhausted or there is an error getting the
+	// next document.
+	item := ArticleItem{}
+	for cursor.Next(context.TODO()) {
+		if err := cursor.Decode(&item); err != nil {
+			log.Fatal(err)
+		}
+		log.Println("Publish:" + makeMessage(item.Title, item.Link))
+		b.Send(channel, makeMessage(item.Title, item.Link), tb.ModeMarkdown)
+	}
+	if err := cursor.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("End publishing...")
+}
+
 func makeMessage(title string, link string) string {
-	return fmt.Sprintf("%s\n\n%s", title, link)
+	return fmt.Sprintf("[%s](%s)", title, link)
 }
 
 // News Bot
@@ -145,14 +194,19 @@ func newsBot() {
 	}
 
 	var collection = getDB()
+	publish(collection, b, channel)
 
 	// CRON every 30 min, check for the feed update
-	// c := cron.New()
-	// c.AddFunc("0 */20 * * * *", func() {
-	fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
-	// })
+	c := cron.New()
+	c.AddFunc("0 */"+strconv.Itoa(voteInterval)+" * * * *", func() {
+		go fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
+	})
 
-	// c.Start()
+	c.AddFunc("0 */"+strconv.Itoa(publishInterval)+" * * * *", func() {
+		go publish(collection, b, channel)
+	})
+
+	c.Start()
 	b.Start()
 }
 
