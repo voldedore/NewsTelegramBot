@@ -158,7 +158,7 @@ func markAsPublished(collection *mongo.Collection, articleGUID string) {
 
 func publish(collection *mongo.Collection, b *tb.Bot, channel *tb.Chat) {
 	log.Println("Publishing...")
-	opts := options.Find().SetSort(bson.D{{"points", 1}}).SetLimit(limit)
+	opts := options.Find().SetSort(bson.D{{"points", -1}}).SetLimit(limit)
 	cursor, err := collection.Find(context.TODO(), bson.D{{"publish", false}, {"points", bson.D{{"$gt", 5}}}}, opts)
 	if err != nil {
 		log.Fatal(err)
