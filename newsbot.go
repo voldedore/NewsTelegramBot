@@ -218,11 +218,11 @@ func newsBot() {
 	// Although it runs well directly if this package was compile as a complete program
 	c := cron.New()
 	c.AddFunc("@every "+strconv.Itoa(voteInterval)+"m", func() {
-		go fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
+		fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
 	})
 
 	c.AddFunc("@every "+strconv.Itoa(publishInterval)+"m", func() {
-		go publish(collection, b, channel)
+		publish(collection, b, channel)
 	})
 
 	c.Start()
