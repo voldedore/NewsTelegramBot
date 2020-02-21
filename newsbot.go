@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	// Dependencies
@@ -217,11 +216,11 @@ func newsBot() {
 	// The legacy syntax (asterisks) doesn't work if this package is imported to another program
 	// Although it runs well directly if this package was compile as a complete program
 	c := cron.New()
-	c.AddFunc("@every "+strconv.Itoa(voteInterval)+"m", func() {
+	c.AddFunc("@every 5m", func() {
 		fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
 	})
 
-	c.AddFunc("@every "+strconv.Itoa(publishInterval)+"m", func() {
+	c.AddFunc("@every 30m", func() {
 		publish(collection, b, channel)
 	})
 
