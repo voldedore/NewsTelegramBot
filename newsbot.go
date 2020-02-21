@@ -1,4 +1,4 @@
-package main
+package newsbot
 
 import (
 	"context"
@@ -254,9 +254,4 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.
 
 	log.Println("Fetching done")
 
-}
-
-// NewsBot runs the bot
-func main() {
-	NewsBot()
 }
