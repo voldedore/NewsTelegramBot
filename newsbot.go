@@ -226,6 +226,7 @@ func newsBot() {
 
 	c.Start()
 	// Testing purpose
+	fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
 	// publish(collection, b, channel)
 	b.Start()
 }
