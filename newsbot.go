@@ -213,21 +213,22 @@ func newsBot() {
 
 	var collection = getDB()
 
-	// CRON every 30 min, check for the feed update
+	// Cron
+	// The legacy syntax (asterisks) doesn't work if this package is imported to another program
+	// Although it runs well directly if this package was compile as a complete program
 	c := cron.New()
-	c.AddFunc("0 */"+strconv.Itoa(voteInterval)+" * * * *", func() {
+	c.AddFunc("@every "+strconv.Itoa(voteInterval)+"m", func() {
 		go fetchGoogleNews(b, channel, newSrcGoogleVNUrl, collection)
 	})
 
-	c.AddFunc("0 */"+strconv.Itoa(publishInterval)+" * * * *", func() {
+	c.AddFunc("@every "+strconv.Itoa(publishInterval)+"m", func() {
 		go publish(collection, b, channel)
 	})
 
 	c.Start()
-	b.Start()
-
 	// Testing purpose
 	// publish(collection, b, channel)
+	b.Start()
 }
 
 func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.Collection) {
@@ -257,5 +258,5 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.
 
 // NewsBot starts the bot, connects to DB, starts the cron
 func NewsBot() {
-	go newsBot()
+	newsBot()
 }
