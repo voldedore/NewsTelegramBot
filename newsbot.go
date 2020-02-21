@@ -39,6 +39,8 @@ const (
 	// Threshold is the minimum point of the article be published, in ${voteInterval} minutes
 	// This is calculated by publishInterval / voteInterval
 	threshold int = 6
+	// Limit is the maximum qty of item to be publish at once
+	limit int64 = 5
 )
 
 // ArticleItem describe what should have in an article entity
@@ -139,9 +141,26 @@ func updateRow(collection *mongo.Collection, articleGUID string) {
 	log.Println("Update article guid " + articleGUID)
 }
 
+func markAsPublished(collection *mongo.Collection, articleGUID string) {
+	opts := options.FindOneAndUpdate().SetUpsert(false)
+	filter := bson.D{{"guid", articleGUID}}
+	update := bson.D{{"$set", bson.D{{"publish", true}}}}
+	var updatedDocument bson.M
+	err := collection.FindOneAndUpdate(context.TODO(), filter, update, opts).Decode(&updatedDocument)
+	if err != nil {
+		// ErrNoDocuments means that the filter did not match any documents in the collection
+		if err == mongo.ErrNoDocuments {
+			return
+		}
+		log.Fatal(err)
+	}
+
+	log.Println("Published article guid " + articleGUID)
+}
+
 func publish(collection *mongo.Collection, b *tb.Bot, channel *tb.Chat) {
 	log.Println("Publishing...")
-	opts := options.Find().SetSort(bson.D{{"points", 1}})
+	opts := options.Find().SetSort(bson.D{{"points", 1}}).SetLimit(limit)
 	cursor, err := collection.Find(context.TODO(), bson.D{{"publish", false}, {"points", bson.D{{"$gt", 5}}}}, opts)
 	if err != nil {
 		log.Fatal(err)
@@ -156,6 +175,7 @@ func publish(collection *mongo.Collection, b *tb.Bot, channel *tb.Chat) {
 			log.Fatal(err)
 		}
 		log.Println("Publish:" + makeMessage(item.Title, item.Link))
+		markAsPublished(collection, item.GUID)
 		b.Send(channel, makeMessage(item.Title, item.Link), tb.ModeMarkdown)
 	}
 	if err := cursor.Err(); err != nil {
@@ -194,7 +214,6 @@ func newsBot() {
 	}
 
 	var collection = getDB()
-	publish(collection, b, channel)
 
 	// CRON every 30 min, check for the feed update
 	c := cron.New()
@@ -208,36 +227,10 @@ func newsBot() {
 
 	c.Start()
 	b.Start()
+
+	// Testing purpose
+	// publish(collection, b, channel)
 }
-
-// func fetchTinhTeNews(b *tb.Bot, channel *tb.Chat) {
-// 	log.Println("Fetching news...")
-// 	// Fetch and parse RSS
-// 	// Open DB
-// 	db, err := sql.Open("sqlite3", dbName)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer db.Close()
-// 	// Instantiate NewsParser
-// 	fp := gofeed.NewParser()
-// 	feed, feedErr := fp.ParseURL(newSrcTinhTeURL)
-// 	if feedErr != nil {
-// 		return
-// 	}
-// 	siteName := feed.Generator
-// 	articles := feed.Items
-// 	for _, item := range articles {
-// 		if !checkIfRowExists(db, item.GUID) {
-// 			log.Println(item.GUID)
-// 			insertArticle(db, siteName, item.GUID)
-// 			b.Send(channel, makeMessage(item.Title, item.GUID))
-// 		}
-// 	}
-
-// 	log.Println("Fetching done")
-
-// }
 
 func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.Collection) {
 	log.Println("Fetching news...")
