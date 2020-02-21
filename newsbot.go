@@ -188,8 +188,8 @@ func makeMessage(title string, link string) string {
 	return fmt.Sprintf("[%s](%s)", title, link)
 }
 
-// News Bot
-func newsBot() {
+// NewsBot starts the bot, connects to DB, starts the cron
+func NewsBot() {
 	b, err := tb.NewBot(tb.Settings{
 		Token:  os.Getenv("NEWS_BOT_SECRET_TOKEN"),
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -258,5 +258,5 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.
 
 // NewsBot runs the bot
 func main() {
-	newsBot()
+	NewsBot()
 }
