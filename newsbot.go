@@ -9,7 +9,6 @@ import (
 	"time"
 
 	// Dependencies
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mmcdole/gofeed"
 	"github.com/robfig/cron"
 	"go.mongodb.org/mongo-driver/bson"

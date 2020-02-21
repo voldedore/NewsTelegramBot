@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/PuerkitoBio/goquery v1.5.1 // indirect
-	github.com/mattn/go-sqlite3 v2.0.3+incompatible
 	github.com/mmcdole/gofeed v1.0.0-beta2
 	github.com/mmcdole/goxpp v0.0.0-20181012175147-0068e33feabf // indirect
 	github.com/robfig/cron v1.2.0
