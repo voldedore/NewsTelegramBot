@@ -12,7 +12,7 @@ _Identify articles by its guid._
 
 This bot use a MongoDB to store articles (title, url...) and publish them.
 
-Create one with the Collection named: `newstelegrambot`.
+Create one with the Database named `newstelegrambot`, and a Collection named `item`.
 
 ### Go module
 
