@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	// Dependencies
@@ -40,6 +41,9 @@ const (
 	// Limit is the maximum qty of item to be publish at once
 	limit int64 = 5
 )
+
+// blacklist of source that we don't want to crawl
+var blacklist = [...]string{"Kênh 14"}
 
 // ArticleItem describe what should have in an article entity
 type ArticleItem struct {
@@ -137,6 +141,27 @@ func updateRow(collection *mongo.Collection, articleGUID string) {
 	}
 
 	log.Println("Update article guid " + articleGUID)
+}
+
+func titleContains(article *gofeed.Item) bool {
+	var result = false
+	for _, word := range blacklist {
+		result = strings.Contains(article.Title, word)
+
+		if result {
+			log.Println(article.Title)
+			return result
+		}
+	}
+	return result
+}
+
+func preConditionCheck(article *gofeed.Item) bool {
+	// Blacklist checking
+	if !titleContains(article) {
+		return true
+	}
+	return false
 }
 
 func markAsPublished(collection *mongo.Collection, articleGUID string) {
@@ -244,11 +269,15 @@ func fetchGoogleNews(b *tb.Bot, channel *tb.Chat, url string, collection *mongo.
 	articles := feed.Items
 
 	for _, item := range articles {
-		if !checkIfRowExists(collection, item.GUID) {
-			log.Println(item.Title)
-			insertArticle(collection, siteName, item)
-		} else {
-			updateRow(collection, item.GUID)
+
+		// This block of code is a bit fuzzy, need improvements!
+		if preConditionCheck(item) {
+			if !checkIfRowExists(collection, item.GUID) {
+				log.Println(item.Title)
+				insertArticle(collection, siteName, item)
+			} else {
+				updateRow(collection, item.GUID)
+			}
 		}
 	}
 
